@@ -41,11 +41,23 @@ section { position: relative; }
 .gl { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100lvh; z-index: 2; pointer-events: none; display: block; }
 .no-webgl .gl { display: none; }
 
+/* No WebGL: a static can takes the stage's place, in the stage's layer. */
+.gl-fallback { position: fixed; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
+.gl-fallback img { height: min(58vh, 520px); width: auto; filter: drop-shadow(0 40px 70px rgba(0, 0, 0, 0.55)); }
+@media (max-width: 760px) { .gl-fallback img { height: min(42vh, 360px); } }
+
 .vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0, 0, 0, 0.75) 100%); }
 
 /* ----------------------------------------------------- type helpers */
 .ln { display: block; overflow: hidden; padding: 0.06em 0 0.04em; margin: -0.06em 0 -0.04em; }
-.ch { display: inline-block; will-change: transform; }
+/* Every Reveal splits its text into one .ch per character, and the page holds
+   well over a hundred of them. will-change promotes each one to its own
+   compositing layer and KEEPS it there, which costs GPU memory for the whole
+   session and shows up as lag on the first screen. Promote only while the
+   characters are actually moving — <Reveal/> adds .is-revealing for the tween
+   and takes it off again on completion. */
+.ch { display: inline-block; }
+.is-revealing .ch { will-change: transform; }
 .outline { color: transparent; -webkit-text-stroke: 2px var(--white); }
 .h-xl { font-size: clamp(3.2rem, 9.5vw, 10rem); }
 .h-mega { font-size: clamp(4rem, 15vw, 17rem); line-height: 0.86; }
@@ -63,14 +75,8 @@ section { position: relative; }
 .btn-ghost:hover { background: var(--white); color: #07062a; padding-right: 2.1em; }
 .btn:hover .btn-arrow { transform: translateX(8px); }
 
-/* ----------------------------------------------------------- loader */
-.loader { position: fixed; inset: 0; z-index: 200; background: var(--black); display: grid; place-items: center; clip-path: inset(0 0 0 0); }
-.loader-inner { width: min(420px, 80vw); }
-.loader-mark { display: flex; align-items: center; justify-content: center; gap: 12px; font-family: var(--display); font-size: clamp(3.4rem, 10vw, 6rem); letter-spacing: 0.04em; line-height: 1; margin-bottom: 2.2rem; }
-.loader-mark svg { width: 0.55em; color: var(--yellow); filter: drop-shadow(0 0 20px rgba(246, 192, 38, 0.7)); }
-.loader-bar { height: 2px; background: var(--line); overflow: hidden; }
-.loader-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--red), var(--yellow)); transform-origin: left; transform: scaleX(0); }
-.loader-meta { display: flex; justify-content: space-between; margin-top: 12px; font-size: 0.72rem; letter-spacing: 0.22em; color: var(--mute); font-variant-numeric: tabular-nums; }
+/* The loading state is the pour splash, which lives inline in index.html so it
+   can paint before this stylesheet does. Nothing for it here. */
 
 /* ------------------------------------------------------------- nav */
 .nav { position: fixed; z-index: 50; top: 14px; left: 50%; transform: translateX(-50%); width: min(1360px, calc(100vw - 28px)); display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 10px 12px 10px 22px; border-radius: 4px; transition: transform 0.7s var(--ease), background 0.4s, backdrop-filter 0.4s, border-color 0.4s; border: 1px solid transparent; }
@@ -80,14 +86,22 @@ section { position: relative; }
 .logo img { height: 58px; width: auto; display: block; margin: -6px 0; filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.45)); transition: transform 0.5s var(--ease); }
 .logo:hover img { transform: rotate(-3deg) scale(1.05); }
 .footer .logo img { height: 96px; }
-.loader-logo { display: block; height: clamp(150px, 26vh, 240px); width: auto; margin: 0 auto 2rem; animation: logoin 1s var(--ease) both; }
-@keyframes logoin { from { opacity: 0; transform: scale(0.8) rotate(-6deg); } }
 .nav-links { display: flex; gap: clamp(14px, 2.2vw, 36px); }
 .nav-links a { position: relative; font-size: 0.74rem; letter-spacing: 0.16em; text-transform: uppercase; padding: 8px 0; color: var(--mute); transition: color 0.3s; }
 .nav-links a::after { content: ''; position: absolute; left: 0; right: 0; bottom: 2px; height: 1px; background: var(--orange); transform: scaleX(0); transform-origin: right; transition: transform 0.5s var(--ease); }
 .nav-links a:hover { color: var(--white); }
 .nav-links a:hover::after { transform: scaleX(1); transform-origin: left; }
 .nav-right { display: flex; align-items: center; gap: 12px; }
+.sound-toggle { position: fixed; z-index: 55; right: var(--pad); bottom: max(20px, env(safe-area-inset-bottom)); display: inline-flex; align-items: center; gap: 11px; min-height: 42px; padding: 0 15px; border: 1px solid rgba(170, 190, 255, 0.3); border-radius: 100px; background: rgba(7, 6, 42, 0.82); color: var(--white); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 10px 35px rgba(0, 0, 0, 0.24); transition: border-color 0.25s, background 0.25s; }
+.sound-toggle:hover, .sound-toggle:focus-visible { border-color: rgba(190, 211, 255, 0.8); background: rgba(27, 31, 89, 0.95); }
+.sound-label { font-size: 0.63rem; font-weight: 700; letter-spacing: 0.18em; white-space: nowrap; }
+.sound-bars { display: flex; align-items: center; justify-content: center; gap: 2px; width: 17px; height: 16px; }
+.sound-bars i { width: 2px; height: 3px; border-radius: 2px; background: #b9caff; transition: height 0.3s ease; }
+.sound-toggle.is-playing .sound-bars i { animation: sound-wave 0.75s ease-in-out infinite alternate; }
+.sound-toggle.is-playing .sound-bars i:nth-child(2) { animation-delay: -0.35s; }
+.sound-toggle.is-playing .sound-bars i:nth-child(3) { animation-delay: -0.55s; }
+.sound-toggle.is-playing .sound-bars i:nth-child(4) { animation-delay: -0.2s; }
+@keyframes sound-wave { from { height: 3px; } to { height: 14px; } }
 .nav .btn { padding: 0.85em 1.2em; }
 .burger { display: none; width: 44px; height: 44px; position: relative; }
 .burger i { position: absolute; left: 11px; right: 11px; height: 2px; background: var(--white); transition: transform 0.5s var(--ease); }
@@ -122,14 +136,29 @@ section { position: relative; }
 /* ------------------------------------------------------------ hero */
 .hero { min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 var(--pad) clamp(28px, 6vh, 64px); overflow: hidden; }
 .hero-bg { background: radial-gradient(ellipse 70% 60% at 68% 55%, rgba(46, 60, 190, 0.55), transparent 70%), linear-gradient(180deg, #0d0b3e 0%, #07062a 80%); }
-.hero-glow { position: absolute; width: 60vw; height: 60vw; right: -8vw; top: 14%; border-radius: 50%; background: radial-gradient(circle, rgba(246, 192, 38, 0.45), rgba(229, 32, 59, 0.12) 45%, transparent 68%); filter: blur(30px); }
+/* The intro scales this from 0.6 to 1. With filter: blur(30px) the browser had
+   to re-blur a 60vw square on every frame of that tween, right when the hero is
+   already the busiest moment on the page. The gradient carries the softness on
+   its own, and promoting the one element makes the scale a cheap layer
+   transform instead of a repaint. */
+.hero-glow { position: absolute; width: 60vw; height: 60vw; right: -8vw; top: 14%; border-radius: 50%; background: radial-gradient(circle, rgba(246, 192, 38, 0.42), rgba(229, 32, 59, 0.14) 38%, rgba(229, 32, 59, 0.05) 58%, transparent 74%); will-change: transform, opacity; }
 .grid-lines { position: absolute; inset: 0; background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 12.5vw 12.5vw; opacity: 0.2; mask-image: radial-gradient(ellipse at 60% 50%, #000, transparent 70%); -webkit-mask-image: radial-gradient(ellipse at 60% 50%, #000, transparent 70%); }
 .hero-title { position: absolute; left: calc(var(--pad) - 0.8vw); top: 40%; transform: translateY(-50%); white-space: nowrap; font-size: clamp(5rem, 19.5vw, 24rem); line-height: 0.84; pointer-events: none; }
 .hero-l1 { font-size: 0.5em; color: var(--white); letter-spacing: 0.02em; padding-left: 0.4vw; }
 .hero-l2 { filter: drop-shadow(0 8px 40px rgba(229, 32, 59, 0.35)); }
 .hero-l2 .ch { background: linear-gradient(180deg, #fff 0%, #ffe27a 36%, var(--orange) 78%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .hero-l2 .ln { padding-right: 0.1em; }
-.hero-copy { max-width: min(460px, 100%); display: grid; gap: 18px; }
+/* The liquid crown bursts right where this copy sits, so the copy carries its
+   own scrim rather than depending on what the 3D stage happens to be doing. */
+.hero-copy { position: relative; max-width: min(460px, 100%); display: grid; gap: 18px; }
+.hero-copy::before {
+  content: '';
+  position: absolute;
+  inset: -30px -40px -44px -34px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(118% 104% at 18% 58%, rgba(7, 6, 42, 0.93), rgba(7, 6, 42, 0.66) 52%, rgba(7, 6, 42, 0) 82%);
+}
 .hero-kicker { display: flex; align-items: center; gap: 12px; font-size: 0.72rem; letter-spacing: 0.24em; color: var(--yellow); }
 .hero-kicker i { width: 36px; height: 1px; background: var(--yellow); }
 .hero-sub { font-size: clamp(1.05rem, 1.5vw, 1.3rem); color: var(--white); max-width: 26ch; }
@@ -139,12 +168,50 @@ section { position: relative; }
 @keyframes drip { 0% { transform: scaleY(0); } 60% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
 .streak { position: absolute; z-index: 4; left: 0; top: 46%; width: 100%; height: 3px; background: linear-gradient(90deg, transparent, var(--orange) 40%, #fff 70%, transparent); box-shadow: 0 0 30px 6px rgba(246, 192, 38, 0.7); pointer-events: none; }
 
-/* ---------------------------------------------------------- marquee */
-.marquee { overflow: hidden; border-block: 1px solid var(--line); background: var(--black); position: relative; z-index: 4; }
+/* ---------------------------------------------------------- marquee
+   The band belongs to the scene rather than sitting on top of it: at z-index 1
+   it is in the .behind layer, so the fixed canvas draws the can over it and the
+   ticker runs behind the product instead of cutting it in half. */
+.marquee {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  /* Lit from below, where the can stands, over a vertical navy gradient — a
+     flat fill between the hero glow and the story gradient reads as a seam. */
+  background:
+    radial-gradient(130% 220% at 50% 135%, rgba(60, 80, 230, 0.5) 0%, rgba(13, 11, 58, 0.9) 42%, rgba(7, 6, 42, 0) 100%),
+    linear-gradient(180deg, #06051f 0%, #0d0b3a 52%, #06051f 100%);
+}
+/* Rules that fade out instead of running hairline-faint from edge to edge. */
+.marquee::before, .marquee::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(246, 192, 38, 0.5) 22%, rgba(246, 192, 38, 0.5) 78%, transparent);
+}
+.marquee::before { top: 0; }
+.marquee::after { bottom: 0; opacity: 0.35; }
+/* The one band directly under the hero carries a lit filament along its top. */
+.marquee-hero::before {
+  background: linear-gradient(90deg, transparent, rgba(246, 192, 38, 0.7) 28%, rgba(255, 255, 255, 0.55) 50%, rgba(246, 192, 38, 0.7) 72%, transparent);
+}
+.marquee-mask {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
 .marquee-track { display: flex; width: max-content; animation: marq 36s linear infinite; }
 .marquee-row { display: flex; }
-.marquee-row span { font-family: var(--display); font-size: clamp(1.6rem, 3.4vw, 3.2rem); padding: 14px 0; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
-.marquee-row b { color: var(--orange); margin: 0 clamp(18px, 2.6vw, 40px); font-size: 0.5em; vertical-align: middle; }
+.marquee-row span:lang(ne), .marquee-row .deva { font-family: 'Nirmala UI', 'Noto Sans Devanagari', 'Kohinoor Devanagari', system-ui, sans-serif; font-weight: 700; }
+.marquee-row span { font-family: var(--display); font-size: clamp(1.6rem, 3.4vw, 3.2rem); padding: clamp(16px, 2.4vh, 28px) 0; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+.marquee-row b { color: var(--orange); margin: 0 clamp(18px, 2.6vw, 40px); font-size: 0.5em; vertical-align: middle; text-shadow: 0 0 16px rgba(246, 192, 38, 0.6); }
+/* Alternating weight gives the line a rhythm: what is printed on the can stays
+   solid, brand voice is ghosted. */
+.marquee-row .mq-ghost { color: transparent; -webkit-text-stroke: 1.4px rgba(247, 246, 255, 0.68); }
+.marquee-row .mq-ghost b { -webkit-text-stroke: 0; color: var(--orange); }
 @keyframes marq { to { transform: translateX(-33.3333%); } }
 
 /* ------------------------------------------------------------ story */
@@ -237,12 +304,31 @@ section { position: relative; }
 .nepal-bg { background: linear-gradient(180deg, #07062a 0%, #171058 30%, #2a2a9a 70%, #ff6a1a 130%); }
 .moon { display: none; position: absolute; right: 18%; top: 14%; width: 9vw; height: 9vw; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff4d6, #f6c026 60%, #f08a30); box-shadow: 0 0 120px 30px rgba(246, 192, 38, 0.3); }
 .ridge { position: absolute; left: -2%; width: 104%; bottom: -2%; }
+/* Pashupatinath stands in the middle distance, right of the copy and clear of
+   the can, at a height that keeps it below the peaks - as it is. */
+.temple { position: absolute; right: 7%; bottom: 9%; height: 32%; width: auto; filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.55)); }
 .city { position: absolute; left: 0; right: 0; bottom: 0; height: 24%; }
 .city i { position: absolute; width: 3px; height: 3px; border-radius: 50%; box-shadow: 0 0 8px 1px currentColor; }
 .nepal-copy { max-width: 780px; }
 .nepal-h { font-size: clamp(3rem, 8vw, 8.8rem); }
-.nepal-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 2.4rem; }
-.nepal-list li { padding: 10px 16px; border: 1px solid var(--line); font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase; background: rgba(5, 5, 5, 0.35); }
+/* The three chips that used to sit here said "Kathmandu after dark", "Stadium
+   roar" and "Himalaya-high ambition". The skyline now says all three: the stupa,
+   the floodlights and Everest. A landmark carries further than a label. */
+.stupa { position: absolute; left: 9%; bottom: 11%; height: 27%; width: auto; filter: drop-shadow(0 16px 36px rgba(0, 0, 0, 0.5)); }
+.floods { position: absolute; left: 31%; bottom: 13%; height: 21%; width: auto; opacity: 0.85; }
+.flags { position: absolute; left: -4%; width: 108%; top: 7%; height: 13%; }
+/* ---- Dashain, 11-25 October. See src/dashain.ts; this is a seasonal layer
+   and it removes itself. */
+.kites { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.kites.is-sparse { opacity: 0.62; }
+.kite { position: absolute; height: auto; overflow: visible; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.45)); }
+.ping { position: absolute; left: 48%; bottom: 10%; height: 19%; width: auto; opacity: 0.9; }
+@media (max-width: 767px) {
+  .temple { right: 2%; bottom: 8%; height: 20%; }
+  .stupa { left: 3%; bottom: 10%; height: 17%; }
+  .floods, .ping { display: none; }
+  .flags { top: 5%; height: 10%; }
+}
 
 /* ---------------------------------------------------------- moments */
 .moments { height: 100vh; overflow: hidden; background: #07062a; }
@@ -296,7 +382,12 @@ section { position: relative; }
 
 /* ----------------------------------------------------------- footer */
 .footer { position: relative; z-index: 4; background: var(--black); border-top: 1px solid var(--line); padding: 56px var(--pad) 28px; }
-.footer-top { display: grid; grid-template-columns: 1fr auto auto; gap: 48px; align-items: start; }
+.footer-top { display: grid; grid-template-columns: 1fr minmax(220px, 0.9fr) auto auto; gap: 48px; align-items: start; }
+.footer-buy { max-width: 42ch; }
+.footer-buy h2 { font-size: 1.5rem; letter-spacing: 0.02em; margin-bottom: 10px; }
+.footer-buy p { font-size: 0.86rem; color: var(--mute); margin-bottom: 14px; }
+.footer-mail { font-size: 0.9rem; letter-spacing: 0.06em; color: var(--yellow); border-bottom: 1px solid currentColor; padding-bottom: 2px; }
+.footer-mail:hover { color: var(--white); }
 .footer nav, .footer .social { display: flex; flex-direction: column; gap: 10px; font-size: 0.78rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mute); }
 .footer nav a:hover, .footer .social a:hover { color: var(--white); }
 .footer-bottom { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 56px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 0.72rem; color: var(--mute); letter-spacing: 0.06em; }
@@ -311,7 +402,10 @@ section { position: relative; }
   .nav { padding: 6px 6px 6px 16px; top: 8px; width: calc(100vw - 16px); }
   .nav .btn { display: none; }
   .hero { padding-bottom: 32px; }
-  .hero-title { top: 22%; transform: none; font-size: clamp(5rem, 31vw, 9rem); }
+  /* nowrap plus 31vw ran XTREME. straight off the right edge, where .hero's
+     overflow: hidden silently clipped it. 26vw fits the widest line. */
+  .hero-title { top: 20%; transform: none; font-size: clamp(3.4rem, 26vw, 9rem); left: var(--pad); }
+  .hero-l2 .ln { padding-right: 0; }
   .hero-corner { display: none; }
   .hero-copy { gap: 14px; }
   .outline { -webkit-text-stroke-width: 1.5px; }
@@ -345,13 +439,17 @@ section { position: relative; }
   .c1, .c2, .c3, .c4, .c5, .c6 { grid-area: auto; }
   .c1, .c3 { grid-row: span 2; }
   .c6 { grid-column: 1 / -1; }
-  .footer-top { grid-template-columns: 1fr 1fr; }
-  .footer-top .logo { grid-column: 1 / -1; }
+  .footer-top { grid-template-columns: 1fr 1fr; gap: 32px; }
+  .footer-top .logo, .footer-buy { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  /* Frozen mid-scroll leaves half-words on screen for good: show one centred
+     set instead, so what is on screen starts and ends on a whole phrase. */
   .marquee-track { animation: none; }
+  .marquee-mask { display: flex; justify-content: center; }
+  .marquee-track .marquee-row + .marquee-row { display: none; }
 }
 
 /* ------------------------------------------------- reels (community) */
@@ -410,3 +508,18 @@ section { position: relative; }
 .reels-rail .ig-bg { position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 15%, rgba(246, 192, 38, 0.2), transparent 60%), linear-gradient(160deg, #1d2390, #07062a); }
 .reels-rail .ig-n { position: absolute; z-index: 1; left: 10px; top: 36%; font-family: var(--display); font-size: clamp(3rem, 5vw, 5rem); line-height: 0.8; color: transparent; -webkit-text-stroke: 1.5px rgba(247, 246, 255, 0.6); }
 @media (max-width: 767px) { .ig-player { margin-inline: auto; } }
+
+/* ---- Dashain accents. The layer switches itself off; see src/dashain.ts. */
+.dashain .label span:first-child { position: relative; }
+.dashain .label span:first-child::after {
+  content: '';
+  position: absolute;
+  right: -11px;
+  top: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 9px rgba(229, 32, 59, 0.8);
+}
+.dashain .hero-kicker { color: var(--yellow); }

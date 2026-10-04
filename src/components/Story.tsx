@@ -3,6 +3,7 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { bus } from '../gl/bus';
 import type { Mood } from '../gl/Stage';
+import { isDashain } from '../dashain';
 import { Marquee, Reveal, SectionLabel, reduceMotion } from './ui';
 
 /* ------------------------------------------------------- Brand story */
@@ -10,7 +11,20 @@ import { Marquee, Reveal, SectionLabel, reduceMotion } from './ui';
 export function BrandStory() {
   return (
     <>
-      <Marquee items={['NO PAUSE', 'NO LIMITS', 'GO XTREME', 'FEEL THE RUSH', 'PUSH FURTHER', 'OWN THE MOMENT']} className="marquee-hero" />
+      {/* NO PAUSE / NO LIMITS / GO XTREME belong to <BrandStatement/>, which
+          spends a whole section on them: repeating them here spoils that and
+          says nothing new. Solid items are lines printed on the can itself;
+          ghosted items are brand voice. Keep the count even — see <Marquee/>. */}
+      <Marquee
+        items={
+          // Keep the count even so the solid/ghosted alternation survives the
+          // seam between repeats - see <Marquee/>.
+          isDashain()
+            ? ['\u0936\u0941\u092d \u0926\u0936\u0948\u0902', 'FEEL THE RUSH', '#XTREMEENERGY', 'PUSH FURTHER', 'XTREME CLASSIC', 'OWN THE MOMENT']
+            : ['VITALIZE BODY AND MIND', 'FEEL THE RUSH', '#XTREMEENERGY', 'PUSH FURTHER', 'XTREME CLASSIC', 'OWN THE MOMENT']
+        }
+        className="marquee-hero"
+      />
       <section className="story" id="story" data-can="0,0,1.25,3.14159,0,0,0,-0.1">
         <div className="bg story-bg">
           <div className="rays" />

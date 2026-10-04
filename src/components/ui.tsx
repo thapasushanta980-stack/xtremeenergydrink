@@ -36,6 +36,10 @@ export function Reveal({ text, as: Tag = 'div', className = '', on = 'scroll', d
           ease: 'expo.out',
           stagger: by === 'char' ? 0.03 : 0.07,
           delay,
+          // Layer promotion lasts exactly as long as the movement does; see
+          // the note on .ch in styles.css.
+          onStart: () => el.classList.add('is-revealing'),
+          onComplete: () => el.classList.remove('is-revealing'),
         });
       if (on === 'ready') {
         if (bus.ready) play();
@@ -76,12 +80,13 @@ interface ButtonProps {
   href?: string;
   variant?: 'primary' | 'ghost';
   cursor?: string;
+  tabIndex?: number;
   onClick?: () => void;
 }
 
-export function Button({ children, href = '#', variant = 'primary', cursor = 'GO →', onClick }: ButtonProps) {
+export function Button({ children, href = '#', variant = 'primary', cursor = 'GO →', tabIndex, onClick }: ButtonProps) {
   return (
-    <a className={`btn btn-${variant}`} href={href} data-cursor={cursor} onClick={onClick}>
+    <a className={`btn btn-${variant}`} href={href} data-cursor={cursor} tabIndex={tabIndex} onClick={onClick}>
       <span className="btn-label">{children}</span>
       <span className="btn-arrow" aria-hidden="true">
         →
@@ -102,11 +107,20 @@ export function SectionLabel({ index, children }: { index: string; children: Rea
 
 /* ------------------------------------------------------------ Marquee */
 
+const DEVANAGARI = /[ऀ-ॿ]/;
+
+/**
+ * The ticker band. Items alternate solid and ghosted so the line has a rhythm
+ * rather than one flat weight; pass an even number of them or the alternation
+ * breaks at the seam between repeats.
+ */
 export function Marquee({ items, className = '' }: { items: string[]; className?: string }) {
   const row = (
     <div className="marquee-row" aria-hidden="true">
       {items.map((t, i) => (
-        <span key={i}>
+        // Anton carries no Devanagari, so a Nepali item is tagged and set in a
+        // face the device already has rather than falling back glyph by glyph.
+        <span key={i} className={`${i % 2 ? 'mq-ghost' : ''} ${DEVANAGARI.test(t) ? 'deva' : ''}`}>
           {t}
           <b>✦</b>
         </span>
@@ -115,10 +129,14 @@ export function Marquee({ items, className = '' }: { items: string[]; className?
   );
   return (
     <div className={`marquee ${className}`} role="presentation">
-      <div className="marquee-track">
-        {row}
-        {row}
-        {row}
+      {/* The fade has to be painted on something still: a mask lives in its own
+          element's box, so on the moving track it would travel along with it. */}
+      <div className="marquee-mask">
+        <div className="marquee-track">
+          {row}
+          {row}
+          {row}
+        </div>
       </div>
     </div>
   );

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Lenis from 'lenis';
-import { NAV, SOCIAL } from '../data';
-import { Stage } from '../gl/Stage';
+import { NAV, PURCHASE, SOCIAL } from '../data';
+import { ENTRANCE, pacedEntrance } from '../intro';
+import type { Stage } from '../gl/Stage';
 import { bus, READY_EVENT } from '../gl/bus';
 import { Button, reduceMotion } from './ui';
 
@@ -19,36 +20,109 @@ export function Logo({ className = '' }: { className?: string }) {
 
 /* ---------------------------------------------------------- GLCanvas */
 
+/**
+ * Reasons never to start the 3D stage at all. Each one is a device telling us
+ * it would rather not, and we take it at its word instead of measuring later.
+ */
+function skipReason(): string | null {
+  const nav = navigator as Navigator & { connection?: { saveData?: boolean }; deviceMemory?: number };
+  if (nav.connection?.saveData) return 'Save-Data requested';
+  if (typeof nav.deviceMemory === 'number' && nav.deviceMemory > 0 && nav.deviceMemory < 2) return 'low device memory';
+  return null;
+}
+
 export function GLCanvas() {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [live, setLive] = useState(true);
+
   useEffect(() => {
-    if (!ref.current) return;
+    const canvas = ref.current;
+    if (!canvas) return;
     let stage: Stage | null = null;
-    try {
-      stage = new Stage(ref.current);
-      bus.stage = stage;
-    } catch {
-      // WebGL unavailable: the DOM experience still works without the 3D can.
+    let cancelled = false;
+
+    /** Hand the page back to the static can, whatever the reason. */
+    const standDown = (why: string) => {
+      if (cancelled) return;
       document.documentElement.classList.add('no-webgl');
+      setLive(false);
+      if (import.meta.env.DEV) console.info(`[xtreme] 3D stage off: ${why}`);
+    };
+
+    const skip = skipReason();
+    if (skip) {
+      standDown(skip);
+      return;
     }
+
+    // three.js is the heaviest thing on the page (~122 KB gzipped). Loading it
+    // on demand keeps it off the first-paint path; the loader has its own
+    // deadline, so a slow or failed chunk delays nothing.
+    import('../gl/Stage')
+      .then(({ Stage }) => {
+        if (cancelled) return;
+        try {
+          stage = new Stage(canvas, (alive) => setLive(alive));
+          bus.stage = stage;
+          // The chunk can land after the loader has already left: the can would
+          // otherwise simply be there, with no entrance.
+          if (bus.ready) stage.playIntro();
+        } catch {
+          standDown('WebGL unavailable');
+        }
+      })
+      .catch(() => standDown('stage chunk failed to load'));
+
     return () => {
+      cancelled = true;
       stage?.destroy();
       bus.stage = null;
     };
   }, []);
-  return <canvas ref={ref} className="gl" aria-hidden="true" />;
+
+  return (
+    <>
+      <canvas ref={ref} className="gl" aria-hidden="true" />
+      {!live && (
+        <div className="gl-fallback">
+          <img src="/media/can-front.png" alt="A chilled can of Xtreme Energy Drink, Classic" />
+        </div>
+      )}
+    </>
+  );
 }
 
 /* ------------------------------------------------------------ Loader */
 
+/**
+ * Not an overlay - the overlay is already on screen. index.html paints the pour
+ * before this bundle exists, and this component is the part that knows when the
+ * page is actually ready: it takes over the dial, holds it short of full until
+ * fonts and the stage are in, and then plays the splash out.
+ */
 export function Loader({ onDone }: { onDone: () => void }) {
-  const [pct, setPct] = useState(0);
-  const root = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
+    const found = window.__splash;
+    // No splash in the document (an unusual host page, or it already timed out
+    // and removed itself): there is nothing to play out, so do not hold the
+    // page back behind a loading state that has no loader.
+    if (!found) {
+      bus.ready = true;
+      bus.stage?.playIntro();
+      window.dispatchEvent(new Event(READY_EVENT));
+      onDone();
+      return;
+    }
+    // Re-bound non-optionally: finish() is hoisted, so a narrowing of the
+    // original would not reach it.
+    const splash: SplashController = found;
+
     let alive = true;
-    const state = { v: 0 };
+    // Pick up wherever the splash's own crawl got to, so the handover is
+    // invisible rather than a pause at whatever number it had reached.
+    const state = { v: splash.get() };
     let fontsReady = false;
+    let forced = false;
     Promise.all([
       document.fonts.load('330px Anton'),
       document.fonts.load('700 46px "Space Grotesk"'),
@@ -57,22 +131,27 @@ export function Loader({ onDone }: { onDone: () => void }) {
       .catch(() => undefined)
       .then(() => (fontsReady = true));
 
+    const stageReady = () => !!bus.stage || document.documentElement.classList.contains('no-webgl');
+    const canFinish = () => forced || (fontsReady && stageReady());
+    // Hard deadline: a slow font request or GPU must never hold the page hostage.
+    const deadline = window.setTimeout(() => (forced = true), reduceMotion() ? 800 : 3500);
+
     const tl = gsap.to(state, {
       v: 100,
       duration: reduceMotion() ? 0.4 : 2.2,
       ease: 'power2.inOut',
       onUpdate: () => {
-        // never finish before fonts/stage are ready
-        const cap = fontsReady && bus.stage ? 100 : 92;
+        // never finish before fonts/stage are ready, or before the deadline fires
+        const cap = canFinish() ? 100 : 92;
         if (state.v > cap) state.v = cap;
-        if (alive) setPct(Math.round(state.v));
+        if (alive) splash.set(state.v);
         if (state.v >= 100 && alive) finish();
       },
     });
     // if capped, keep nudging until ready
     const poll = window.setInterval(() => {
-      if (fontsReady && (bus.stage || document.documentElement.classList.contains('no-webgl')) && state.v >= 92) {
-        gsap.to(state, { v: 100, duration: 0.5, onUpdate: () => alive && setPct(Math.round(state.v)), onComplete: finish });
+      if (canFinish() && state.v >= 92) {
+        gsap.to(state, { v: 100, duration: 0.5, onUpdate: () => alive && splash.set(state.v), onComplete: finish });
         window.clearInterval(poll);
       }
     }, 150);
@@ -82,42 +161,32 @@ export function Loader({ onDone }: { onDone: () => void }) {
       if (finished) return;
       finished = true;
       window.clearInterval(poll);
-      const el = root.current;
-      if (!el) return;
-      gsap.to(el, {
-        clipPath: 'inset(0 0 100% 0)',
-        duration: 1,
-        ease: 'expo.inOut',
-        delay: 0.25,
-        onStart: () => {
-          bus.ready = true;
-          bus.stage?.playIntro();
-          window.dispatchEvent(new Event(READY_EVENT));
-        },
-        onComplete: onDone,
-      });
+      window.clearTimeout(deadline);
+      // Measure everything while the splash still covers the screen. This pass
+      // reads the position of every scroll anchor on the page, and it used to
+      // run after the loader had gone - landing a full layout on the first
+      // frame the visitor actually saw, at the same moment as the hero intro.
+      ScrollTrigger.refresh();
+      bus.stage?.refresh();
+      // For the length of the entrance a long frame stretches time instead of
+      // skipping through it; see pacedEntrance().
+      pacedEntrance();
+      // The page is live from the moment the splash starts leaving, so the
+      // hero intro plays into the fade rather than after it.
+      bus.ready = true;
+      bus.stage?.playIntro();
+      window.dispatchEvent(new Event(READY_EVENT));
+      splash.done(onDone);
     }
     return () => {
       alive = false;
       tl.kill();
       window.clearInterval(poll);
+      window.clearTimeout(deadline);
     };
   }, [onDone]);
 
-  return (
-    <div className="loader" ref={root} role="status" aria-label={`Loading ${pct}%`}>
-      <div className="loader-inner">
-        <img className="loader-logo" src="/logo.png" alt="Xtreme Energy Drink" />
-        <div className="loader-bar">
-          <i style={{ transform: `scaleX(${pct / 100})` }} />
-        </div>
-        <div className="loader-meta">
-          <span>LOADING ENERGY…</span>
-          <span>{String(pct).padStart(2, '0')}%</span>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 /* ------------------------------------------------------------ Navbar */
@@ -127,20 +196,93 @@ export function Navbar() {
   const [hidden, setHidden] = useState(false);
   const [solid, setSolid] = useState(false);
   const last = useRef(0);
+  const menu = useRef<HTMLDivElement>(null);
+  const burger = useRef<HTMLButtonElement>(null);
+
+  const close = () => {
+    setOpen(false);
+    burger.current?.focus();
+  };
 
   useEffect(() => {
-    const onScroll = () => {
+    // Scroll fires far more often than the screen refreshes: fold the burst
+    // into one read per frame so the nav never competes with the scroll.
+    let queued = 0;
+    const read = () => {
+      queued = 0;
       const y = window.scrollY;
       setSolid(y > 40);
       if (!open) setHidden(y > last.current && y > 400);
       last.current = y;
     };
+    const onScroll = () => {
+      if (!queued) queued = requestAnimationFrame(read);
+    };
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(queued);
+    };
   }, [open]);
+
+  // The entrance the hero was trying to play on it from outside its own scope.
+  useEffect(() => {
+    if (reduceMotion()) return;
+    gsap.set('.nav', { yPercent: -120, opacity: 0 });
+    const play = () =>
+      gsap.to('.nav', {
+        yPercent: 0,
+        opacity: 1,
+        duration: 1,
+        ease: 'expo.out',
+        delay: ENTRANCE.nav,
+        // Hand the transform back to CSS, or the inline one GSAP leaves behind
+        // outranks .nav.is-hidden and the hide-on-scroll stops working.
+        onComplete: () => gsap.set('.nav', { clearProps: 'transform,opacity' }),
+      });
+    if (bus.ready) play();
+    else window.addEventListener(READY_EVENT, play, { once: true });
+    return () => window.removeEventListener(READY_EVENT, play);
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle('menu-open', open);
+    const el = menu.current;
+    if (!el) return;
+    // A clipped menu is still in the tab order unless it is inert.
+    if (open) {
+      el.removeAttribute('inert');
+      el.querySelector<HTMLElement>('a')?.focus();
+    } else {
+      el.setAttribute('inert', '');
+    }
+  }, [open]);
+
+  // Escape closes; Tab cycles inside the open menu.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = menu.current?.querySelectorAll<HTMLElement>('a[href]');
+      if (!items?.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !menu.current?.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
   return (
@@ -156,20 +298,33 @@ export function Navbar() {
         </nav>
         <div className="nav-right">
           <Button href="#products">GET XTREME</Button>
-          <button className="burger" aria-expanded={open} aria-label="Menu" onClick={() => setOpen(!open)}>
+          <button
+            ref={burger}
+            className="burger"
+            aria-expanded={open}
+            aria-controls="menu"
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            onClick={() => (open ? close() : setOpen(true))}
+          >
             <i />
             <i />
           </button>
         </div>
       </header>
-      <div className={`menu ${open ? 'is-open' : ''}`} aria-hidden={!open}>
+      <div id="menu" className={`menu ${open ? 'is-open' : ''}`} ref={menu}>
         {NAV.map((n, i) => (
-          <a key={n.href} href={n.href} onClick={() => setOpen(false)} style={{ transitionDelay: `${open ? 0.12 + i * 0.05 : 0}s` }}>
+          <a
+            key={n.href}
+            href={n.href}
+            tabIndex={open ? undefined : -1}
+            onClick={() => setOpen(false)}
+            style={{ transitionDelay: `${open ? 0.12 + i * 0.05 : 0}s` }}
+          >
             <small>0{i + 1}</small>
             {n.label}
           </a>
         ))}
-        <Button href="#products" onClick={() => setOpen(false)}>
+        <Button href="#products" tabIndex={open ? undefined : -1} onClick={() => setOpen(false)}>
           GET XTREME
         </Button>
       </div>
@@ -241,12 +396,38 @@ export function CustomCursor() {
 export function ScrollProgress() {
   const bar = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const on = () => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      if (bar.current) bar.current.style.transform = `scaleX(${max > 0 ? window.scrollY / max : 0})`;
+    // scrollHeight forces the browser to settle layout. Reading it on every
+    // scroll event puts that cost directly in the scroll path, so measure it
+    // when the page can actually change height and cache it in between.
+    let max = 0;
+    let queued = 0;
+    const measure = () => {
+      max = document.documentElement.scrollHeight - window.innerHeight;
     };
+    const paint = () => {
+      queued = 0;
+      const v = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      if (bar.current) bar.current.style.transform = `scaleX(${v})`;
+    };
+    const on = () => {
+      if (!queued) queued = requestAnimationFrame(paint);
+    };
+    const remeasure = () => {
+      measure();
+      on();
+    };
+    measure();
+    paint();
+    const ro = new ResizeObserver(remeasure);
+    ro.observe(document.body);
     window.addEventListener('scroll', on, { passive: true });
-    return () => window.removeEventListener('scroll', on);
+    window.addEventListener('resize', remeasure);
+    return () => {
+      window.removeEventListener('scroll', on);
+      window.removeEventListener('resize', remeasure);
+      ro.disconnect();
+      cancelAnimationFrame(queued);
+    };
   }, []);
   return (
     <div className="progress" aria-hidden="true">
@@ -292,12 +473,18 @@ export function Footer() {
     <footer className="footer" id="contact">
       <div className="footer-top">
         <Logo />
+        <div className="footer-buy">
+          <h2>Where to buy</h2>
+          <p>Looking for a can, or want to stock Xtreme? Tell us where you are and we will point you to the nearest supply.</p>
+          <a className="footer-mail" href={`mailto:${PURCHASE.email}`} data-cursor="MAIL">
+            {PURCHASE.email}
+          </a>
+        </div>
+        {/* Privacy and Terms return here once real pages exist — a link to '#' promises a page that is not there. */}
         <nav aria-label="Footer">
           <a href="#products">Products</a>
           <a href="#story">About</a>
-          <a href="mailto:hello@xtreme.com.np">Contact</a>
-          <a href="#">Privacy</a>
-          <a href="#">Terms</a>
+          <a href={`mailto:${PURCHASE.email}`}>Contact</a>
         </nav>
         <div className="social">
           <a href={SOCIAL.instagram} target="_blank" rel="noopener noreferrer" data-cursor="hover">Instagram</a>

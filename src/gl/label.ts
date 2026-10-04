@@ -51,6 +51,45 @@ const LW = 2048;
 const LH = 1608;
 const NAVY = '#1a1a78';
 
+/*
+  Pack geometry, measured off public/media/can-front.png rather than eyeballed.
+
+  Vertical figures are fractions of the can's height, read from where each band
+  of colour starts and stops. Horizontal figures are texture offsets from the
+  centre of a face, obtained by un-projecting the photo column through
+  asin(sx/halfW - 1): that is where each element genuinely sits once the
+  camera's curvature is taken back out. A face is half the can, so two of them
+  tile the full turn.
+*/
+const PACK = {
+  navy: '#222c87',
+  side: '#121a5e', // the same navy, curving away from the light
+  red: '#c5163a',
+  gold: '#f9d500',
+  silver: '#eceef6',
+  hash: 0.045,
+  markTop: 0.112,
+  markBot: 0.545,
+  name: 0.74,
+  drink: 0.808,
+  claim: 0.845,
+  footTop: 0.924,
+  footBot: 0.954,
+};
+
+/** One wrap face is half the can. */
+const FACE = LW / 2;
+
+/** Measured silver runs: [x0, x1, yTop, yBottom] in texture offsets / height fractions. */
+const MARK: [number, number, number, number][] = [
+  [-182, 285, 0.112, 0.185],
+  [-342, -222, 0.185, 0.42],
+  [155, 342, 0.185, 0.26],
+  [147, 325, 0.26, 0.42],
+  [-342, 155, 0.42, 0.49],
+  [-342, -248, 0.49, 0.545],
+];
+
 /** Scribbled brand X (yellow), approximating the logo mark. */
 function xMark(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, color: string) {
   ctx.save();
@@ -73,63 +112,133 @@ function xMark(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number,
   ctx.restore();
 }
 
+/**
+ * Draw text to a measured width.
+ *
+ * Sizing from a font size assumes the font has loaded and that its metrics are
+ * what we think; sizing from measureText does not. The pack's words are set to
+ * the widths they occupy on the pack, whatever face ends up rendering them.
+ */
+function fitText(ctx: CanvasRenderingContext2D, text: string, cx: number, baseline: number, width: number, weight: string, family: string) {
+  ctx.font = `${weight}100px ${family}`;
+  const m = ctx.measureText(text).width || width;
+  ctx.font = `${weight}${Math.max(8, Math.round((width / m) * 100))}px ${family}`;
+  ctx.fillText(text, cx, baseline);
+}
+
+/** One face of the wrap, at the pack's measured proportions. */
 function drawDesign(ctx: CanvasRenderingContext2D, f: Flavour, cx: number) {
-  // chunky white geometric blocks, echoing the pack's large "X" construction
-  ctx.fillStyle = '#f4f4ff';
-  ctx.beginPath();
-  ctx.moveTo(cx - 330, 120);
-  ctx.lineTo(cx + 110, 120);
-  ctx.lineTo(cx + 110, 150);
-  ctx.lineTo(cx + 330, 150);
-  ctx.lineTo(cx + 330, 760);
-  ctx.lineTo(cx + 120, 760);
-  ctx.lineTo(cx + 120, 300);
-  ctx.lineTo(cx - 140, 300);
-  ctx.lineTo(cx - 140, 780);
-  ctx.lineTo(cx - 330, 780);
-  ctx.closePath();
-  ctx.fill();
-
-  xMark(ctx, cx + 20, 930, 520, '#ffe21f');
-
+  const y = (t: number) => t * LH;
+  ctx.save();
   ctx.textAlign = 'center';
-  ctx.font = '300px Anton, Impact, sans-serif';
-  ctx.fillStyle = '#e5203b';
-  ctx.fillText('XTREME', cx, 1290);
+
+  // Softened: these are straight runs read off the photo, and a hard rectangle
+  // edge meeting a photograph announces itself. The blur costs nothing and the
+  // dissolve then has nothing to catch on.
+  ctx.fillStyle = PACK.silver;
+  ctx.filter = 'blur(7px)';
+  for (const [x0, x1, t0, t1] of MARK) ctx.fillRect(cx + x0, y(t0), x1 - x0, y(t1) - y(t0));
+  ctx.filter = 'none';
+
+  xMark(ctx, cx + 200, y(0.625), 290, PACK.gold);
+
+  ctx.fillStyle = PACK.red;
+  fitText(ctx, 'XTREME', cx + 20, y(PACK.name) + 0.045 * LH, 610, '', 'Anton, Impact, sans-serif');
   ctx.fillStyle = '#fff';
-  ctx.font = '96px Anton, Impact, sans-serif';
-  ctx.fillText('ENERGY DRINK', cx, 1390);
-  ctx.font = '700 36px "Space Grotesk", Arial, sans-serif';
-  spaced(ctx, 'ENERGIZES BODY AND MIND', cx, 1440, 4);
+  fitText(ctx, 'ENERGY DRINK', cx + 20, y(PACK.drink) + 0.016 * LH, 470, '', 'Anton, Impact, sans-serif');
+  fitText(ctx, 'VITALIZE BODY AND MIND', cx + 20, y(PACK.claim) + 0.009 * LH, 430, '700 ', '"Space Grotesk", Arial, sans-serif');
 
-  ctx.fillStyle = '#f4f4ff';
-  ctx.fillRect(0, 1500, LW, 130);
-  ctx.fillStyle = NAVY;
-  ctx.font = '96px Anton, Impact, sans-serif';
-  ctx.fillText(f.name[1] === 'CLASSIC' ? 'CLASSIC' : f.name.join(' '), cx, 1600);
+  // the white foot band runs right round the can
+  ctx.fillStyle = PACK.silver;
+  ctx.fillRect(cx - FACE / 2, y(PACK.footTop), FACE, y(PACK.footBot) - y(PACK.footTop));
+  ctx.fillStyle = PACK.navy;
+  fitText(ctx, f.name[1] === 'CLASSIC' ? 'CLASSIC' : f.name.join(' '), cx, y(PACK.footBot) - 0.006 * LH, 300, '', 'Anton, Impact, sans-serif');
 
-  ctx.fillStyle = '#e5203b';
-  ctx.font = '700 46px "Space Grotesk", Arial, sans-serif';
-  spaced(ctx, '#XTREMEENERGY', cx, 90, 6);
+  ctx.fillStyle = PACK.red;
+  fitText(ctx, '#XTREMEENERGY', cx + 17, y(PACK.hash) + 0.012 * LH, 454, '700 ', '"Space Grotesk", Arial, sans-serif');
+  ctx.restore();
+}
+
+const TAU = Math.PI * 2;
+/**
+ * How far out the photo is still evidence rather than a smear. Measured: the
+ * outer 10 degrees of the pack photo hold 5.3 source pixels and have to cover
+ * 57 texture columns - a 10.8x stretch. At 60 degrees it is 2.2x, which holds.
+ */
+const SHARP = 1.05;
+/** Radians over which the photo dissolves into the drawn wrap. */
+const FADE = 0.34;
+
+/**
+ * Build the 360 degree wrap.
+ *
+ * A photograph of a cylinder cannot describe that cylinder's sides - the
+ * information is not in the file - and this can idles, so every part of the
+ * wrap faces the camera sooner or later. Projecting the photo the whole way
+ * round therefore always failed somewhere: first as a tear where the angle was
+ * folded, then as a bright band of 10x-stretched edge pixels sweeping across
+ * the front.
+ *
+ * So the wrap is DRAWN from the measurements above, and the photo is laid over
+ * the part of each face where it is still sharp. Because both come from the
+ * same measurements they register, and the dissolve between them has little to
+ * give away. Towards the sides the drawn navy darkens, so the photo thinning
+ * out reads as the can curving away from the light rather than as artwork
+ * running out.
+ */
+function paintWrap(ctx: CanvasRenderingContext2D, img: HTMLImageElement, f: Flavour) {
+  const halfW = img.width / 2;
+
+  // 1. the field, darkening towards the sides of each face
+  for (const centre of [0, FACE, LW]) {
+    const g = ctx.createLinearGradient(centre - FACE / 2, 0, centre + FACE / 2, 0);
+    g.addColorStop(0, PACK.side);
+    g.addColorStop(0.3, PACK.navy);
+    g.addColorStop(0.7, PACK.navy);
+    g.addColorStop(1, PACK.side);
+    ctx.fillStyle = g;
+    ctx.fillRect(centre - FACE / 2, 0, FACE, LH);
+  }
+
+  // 2. the drawn faces; the one at u = 0 straddles the texture edge
+  drawDesign(ctx, f, 0);
+  drawDesign(ctx, f, LW);
+  drawDesign(ctx, f, FACE);
+
+  // 3. the photo over the sharp middle of each face
+  const span = Math.round((SHARP / TAU) * LW);
+  for (const centre of [0, FACE]) {
+    for (let i = -span; i <= span; i++) {
+      const th = (i / LW) * TAU;
+      const a = Math.abs(th);
+      ctx.globalAlpha = a <= SHARP - FADE ? 1 : Math.max(0, (SHARP - a) / FADE);
+      const sx = halfW * (1 + Math.sin(th));
+      const sw = Math.max(1, halfW * Math.abs(Math.cos(th)) * (TAU / LW) + 0.5);
+      ctx.drawImage(img, Math.min(img.width - sw, Math.max(0, sx - sw / 2)), 0, sw, img.height, (centre + i + LW) % LW, 0, 1, LH);
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 /**
- * Wrap for the can body: the supplied Xtreme Classic 330 ml pack photo (public/media/can-front.png)
- * projected onto the cylinder. No packaging element is redrawn. Only the front of the pack was
- * supplied, so the same artwork is repeated around the can until a full wrap is provided
- * (drop it at public/media/can-wrap.png, 2048x1608, to override).
+ * Wrap for the can body: the supplied Xtreme Classic pack photo (public/media/can-front.png)
+ * projected onto the cylinder, with the back painted from the brand panel.
+ * Drop a full 360 wrap at public/media/can-wrap.png (2048x1608) to override all of it.
  */
-export function makeLabel(_f: Flavour, maxAniso: number): THREE.CanvasTexture {
+export function makeLabel(f: Flavour, maxAniso: number): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = LW;
   c.height = LH;
   const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#2a3a9e';
+  ctx.fillStyle = NAVY;
   ctx.fillRect(0, 0, LW, LH);
 
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = maxAniso;
+  // The front of the pack sits across u = 0, so the two edges of the texture
+  // have to filter into each other or the seam shows as a line down the can.
+  t.wrapS = THREE.RepeatWrapping;
 
   const load = (src: string) =>
     new Promise<HTMLImageElement>((res, rej) => {
@@ -144,23 +253,21 @@ export function makeLabel(_f: Flavour, maxAniso: number): THREE.CanvasTexture {
       ctx.drawImage(img, 0, 0, LW, LH);
       t.needsUpdate = true;
     })
-    .catch(() =>
-      load('/media/can-front.png').then((img) => {
-        // inverse cylindrical projection: photo column = sin(angle); the back repeats the front (un-mirrored)
-        const front = LW / 2;
-        for (let x = 0; x < LW; x++) {
-          let th = ((x - front) / LW) * Math.PI * 2;
-          if (th > Math.PI / 2) th -= Math.PI;
-          else if (th < -Math.PI / 2) th += Math.PI;
-          // beyond ~72° the photo is too foreshortened to be sharp: hold that column instead of smearing
-          const cl = Math.max(-1.26, Math.min(1.26, th));
-          const sx = (img.width / 2) * (1 + Math.sin(cl));
-          const sw = Math.max(1, (img.width / 2) * Math.abs(Math.cos(cl)) * ((Math.PI * 2) / LW) + 0.5);
-          ctx.drawImage(img, Math.min(img.width - sw, Math.max(0, sx - sw / 2)), 0, sw, img.height, x, 0, 1, LH);
-        }
-        t.needsUpdate = true;
-      }),
-    );
+    .catch(() => load('/media/can-front.png'))
+    .then((img) => {
+      if (!img) return;
+      paintWrap(ctx, img, f);
+      t.needsUpdate = true;
+    })
+    .catch(() => {
+      // No artwork at all: the can still has to look like the product.
+      ctx.fillStyle = PACK.navy;
+      ctx.fillRect(0, 0, LW, LH);
+      drawDesign(ctx, f, 0);
+      drawDesign(ctx, f, LW);
+      drawDesign(ctx, f, FACE);
+      t.needsUpdate = true;
+    });
   return t;
 }
 

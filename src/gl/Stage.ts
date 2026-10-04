@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { FLAVOURS, type Flavour } from '../data';
+import { ENTRANCE } from '../intro';
 import {
   makeBerryTexture,
   makeCondensation,
@@ -97,14 +98,33 @@ export class Stage {
   private visible = true;
   private io: IntersectionObserver | null = null;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  /* --- resilience and pacing ------------------------------------------- */
+  private lost = false; // the GPU took the context away
+  private maxDpr: number;
+  private quality = 2; // 2 full · 1 reduced · 0 minimal
+  private frameMs = 16.7; // smoothed frame time, the only quality signal
+  private hold = 90; // frames to wait before grading again
+  private skipGrade = true; // the frame after a pause is always a long one
+  private refreshQueued = 0;
+
+  /**
+   * @param canvas    the one fixed canvas the whole page shares
+   * @param onContext called with `false` when the GPU drops the context and
+   *                  `true` when it comes back, so the page can swap in the
+   *                  static can meanwhile instead of showing an empty stage.
+   */
+  constructor(
+    private canvas: HTMLCanvasElement,
+    private onContext?: (alive: boolean) => void,
+  ) {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: !this.small,
       alpha: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.small ? 1.5 : 1.75));
+    this.maxDpr = Math.min(window.devicePixelRatio, this.small ? 1.5 : 1.75);
+    this.renderer.setPixelRatio(this.maxDpr);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -125,7 +145,10 @@ export class Stage {
     window.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerdown', this.onDown);
     window.addEventListener('pointerup', this.onUp);
-    this.ro = new ResizeObserver(() => this.refresh());
+    canvas.addEventListener('webglcontextlost', this.onLost);
+    canvas.addEventListener('webglcontextrestored', this.onRestored);
+    // Measuring every anchor is a layout read: coalesce bursts into one frame.
+    this.ro = new ResizeObserver(this.queueRefresh);
     this.ro.observe(document.body);
 
     this.io = new IntersectionObserver(([e]) => (this.visible = e.isIntersecting), { threshold: 0 });
@@ -391,8 +414,12 @@ export class Stage {
     const mat = new THREE.MeshPhysicalMaterial({
       color: this.splashColor,
       emissive: this.splashColor,
-      emissiveIntensity: 0.28,
-      roughness: 0.06,
+      // The crown is DoubleSide, so its inner surface faces away from every
+      // light and was rendering near black - a dark shell around the juice.
+      // Emissive is added whatever the lighting does, so it sets a floor at the
+      // juice colour and the inside reads as liquid rather than as a hole.
+      emissiveIntensity: 0.7,
+      roughness: 0.12,
       metalness: 0,
       clearcoat: 1,
       clearcoatRoughness: 0.02,
@@ -411,7 +438,7 @@ export class Stage {
     const dm = new THREE.MeshPhysicalMaterial({
       color: this.splashColor,
       emissive: this.splashColor,
-      emissiveIntensity: 0.4,
+      emissiveIntensity: 0.55,
       roughness: 0.05,
       clearcoat: 1,
       envMapIntensity: 2,
@@ -456,10 +483,12 @@ export class Stage {
       this.splash('#f6c026');
       return;
     }
-    gsap.fromTo(this.intro, { x: 9, stretch: 1.9 }, { x: 0, stretch: 1, duration: 1.15, ease: 'expo.out', delay: 0.5 });
-    gsap.to(this.intro, { alpha: 1, duration: 0.2, delay: 0.5 });
-    gsap.delayedCall(0.95, () => this.splash('#f6c026'));
-    gsap.delayedCall(1.8, () => (this.introDone = true));
+    // Beats from ENTRANCE: the can arrives as the splash lifts rather than
+    // behind it, and the liquid crown fires clear of the handover.
+    gsap.fromTo(this.intro, { x: 9, stretch: 1.9 }, { x: 0, stretch: 1, duration: 1.15, ease: 'expo.out', delay: ENTRANCE.can });
+    gsap.to(this.intro, { alpha: 1, duration: 0.2, delay: ENTRANCE.can });
+    gsap.delayedCall(ENTRANCE.burst, () => this.splash('#f6c026'));
+    gsap.delayedCall(ENTRANCE.settle, () => (this.introDone = true));
   }
 
   setMood(m: Mood) {
@@ -483,6 +512,15 @@ export class Stage {
     gsap.to(r.ingK, { v: 1, duration: 1.4, ease: 'expo.out' });
   }
 
+  /** Re-measure section anchors at most once per frame. */
+  private queueRefresh = () => {
+    if (this.refreshQueued) return;
+    this.refreshQueued = requestAnimationFrame(() => {
+      this.refreshQueued = 0;
+      this.refresh();
+    });
+  };
+
   /** Re-measure section anchors (data-can attributes). */
   refresh() {
     const els = Array.from(document.querySelectorAll<HTMLElement>('[data-can]'));
@@ -497,11 +535,89 @@ export class Stage {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.small = w < 768;
+    this.maxDpr = Math.min(window.devicePixelRatio, this.small ? 1.5 : 1.75);
+    this.renderer.setPixelRatio(this.dpr());
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.refresh();
   }
+
+  /* ------------------------------------------------------------- quality
+
+     One dial, driven by measured frame time rather than by guessing at the
+     device. Dropping a tier costs resolution and atmosphere, never the can. */
+
+  private dpr() {
+    return this.quality === 2 ? this.maxDpr : this.quality === 1 ? Math.min(this.maxDpr, 1.25) : 1;
+  }
+
+  private applyQuality() {
+    this.renderer.setPixelRatio(this.dpr());
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.points.visible = this.quality > 0;
+    this.smokes.forEach((s) => (s.visible = this.quality > 1));
+  }
+
+  /**
+   * Smooth the frame time and step the tier when it stays off target.
+   *
+   * What is measured is the gap between frames, which the display caps: a
+   * perfectly healthy page on a 60 Hz screen sits at 16.7 ms and never goes
+   * below it. So the thresholds straddle that cadence rather than chasing an
+   * unreachable number — DROP is about 42 fps, CLIMB is "comfortably keeping
+   * up", and the gap between them is the hysteresis.
+   */
+  private static readonly DROP_MS = 24;
+  private static readonly CLIMB_MS = 18;
+
+  private grade(ms: number) {
+    if (this.skipGrade) {
+      this.skipGrade = false;
+      return;
+    }
+    this.frameMs += (Math.min(ms, 100) - this.frameMs) * 0.05;
+    if (this.hold > 0) {
+      this.hold--;
+      return;
+    }
+    if (this.frameMs > Stage.DROP_MS && this.quality > 0) {
+      this.quality--;
+      this.applyQuality();
+      this.hold = 240; // ~4 s: let the new tier settle before judging it
+    } else if (this.frameMs < Stage.CLIMB_MS && this.quality < 2) {
+      this.quality++;
+      this.applyQuality();
+      this.hold = 600; // ~10 s: climbing back is the slower move, so a brief
+      // calm patch cannot start a seesaw between two tiers
+    }
+  }
+
+  /* ------------------------------------------------------- context loss */
+
+  private onLost = (e: Event) => {
+    // Default-prevented means we are asking for a restore, and the browser
+    // only honours that if we ask during the event itself.
+    e.preventDefault();
+    this.lost = true;
+    cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    document.documentElement.classList.add('no-webgl');
+    this.onContext?.(false);
+  };
+
+  private onRestored = () => {
+    // three.js re-uploads its own resources; we restart what we own.
+    this.lost = false;
+    document.documentElement.classList.remove('no-webgl');
+    this.applyQuality();
+    this.refresh();
+    this.last = performance.now();
+    this.skipGrade = true;
+    this.hold = 90;
+    if (!this.raf) this.raf = requestAnimationFrame(this.loop);
+    this.onContext?.(true);
+  };
 
   /* -------------------------------------------------------------- input */
 
@@ -522,12 +638,18 @@ export class Stage {
   /* ---------------------------------------------------------------- loop */
 
   private loop = () => {
+    if (this.lost) return; // no context: nothing to drive and nothing to draw
     this.raf = requestAnimationFrame(this.loop);
     const now = performance.now();
+    const raw = now - this.last;
     const dtMul = import.meta.env.DEV ? (window as unknown as { __dtMul?: number }).__dtMul ?? 1 : 1;
-    const dt = Math.min(0.05, (now - this.last) / 1000) * dtMul;
+    const dt = Math.min(0.05, raw / 1000) * dtMul;
     this.last = now;
-    if (document.hidden || !this.visible) return;
+    if (document.hidden || !this.visible) {
+      this.skipGrade = true; // the first frame back is not a performance signal
+      return;
+    }
+    this.grade(raw);
     this.t += dt;
     const a = performance.now();
     this.update(dt);
@@ -737,12 +859,36 @@ export class Stage {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.refreshQueued);
+    gsap.killTweensOf([this.intro, this.zoom, this.selF, this.moodS, ...this.rigs.map((r) => r.ingK)]);
     window.removeEventListener('resize', this.onResizeBound);
     window.removeEventListener('pointermove', this.onMove);
     window.removeEventListener('pointerdown', this.onDown);
     window.removeEventListener('pointerup', this.onUp);
+    this.canvas.removeEventListener('webglcontextlost', this.onLost);
+    this.canvas.removeEventListener('webglcontextrestored', this.onRestored);
     this.ro.disconnect();
     this.io?.disconnect();
+
+    // Geometries, materials and generated textures are GPU memory: hand every
+    // one back. renderer.dispose() alone leaves them allocated.
+    const killMaterial = (m: THREE.Material) => {
+      for (const v of Object.values(m) as unknown[]) {
+        if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
+      }
+      m.dispose();
+    };
+    this.scene.traverse((o) => {
+      const h = o as Partial<THREE.Mesh> & { material?: THREE.Material | THREE.Material[] };
+      h.geometry?.dispose();
+      const mat = h.material;
+      if (Array.isArray(mat)) mat.forEach(killMaterial);
+      else if (mat) killMaterial(mat);
+    });
+    this.scene.environment?.dispose();
+    this.scene.clear();
+    // Not forceContextLoss(): the canvas outlives this Stage and a remount
+    // takes the same context straight back.
     this.renderer.dispose();
   }
 }

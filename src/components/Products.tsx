@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { FLAVOURS } from '../data';
+import { FLAVOURS, buyHref, buyLabel } from '../data';
 import { bus } from '../gl/bus';
 import { Button, Reveal, SectionLabel, reduceMotion } from './ui';
 
@@ -74,19 +74,20 @@ export function Products() {
         </h3>
         <p className="pd-desc pd-in">{f.desc}</p>
         <div className="pd-cta pd-in">
-          <Button href="#contact">BUY NOW</Button>
+          <Button href={buyHref()}>{buyLabel()}</Button>
           <Button href="#energy" variant="ghost" cursor="EXPLORE">
             EXPLORE
           </Button>
         </div>
       </div>
 
-      <div className="fg pd-select" role="tablist" aria-label="Choose a flavour">
+      {/* A pack chooser, not a tab set: ordinary toggle buttons describe it honestly. */}
+      <div className="fg pd-select" role="group" aria-label="Choose a pack">
         {FLAVOURS.map((x, i) => (
           <button
             key={x.id}
-            role="tab"
-            aria-selected={i === sel}
+            type="button"
+            aria-pressed={i === sel}
             className={i === sel ? 'is-active' : ''}
             onClick={() => choose(i)}
             data-cursor="SELECT"
